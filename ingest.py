@@ -19,12 +19,11 @@ load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
 DB_CONN = "dbname=knowledge_base user=admin password=password123 host=localhost"
-REPO_NAME = "sample-api"
-TEAM_NAME = "application"
-BASE_DIR = Path("sample_project")
+BASE_DIR = Path("sample_projects")
 HASH_DIM = 384
 OPENROUTER_MAX_RETRIES = int(os.getenv("OPENROUTER_MAX_RETRIES", "5"))
 OPENROUTER_RETRY_DELAY = float(os.getenv("OPENROUTER_RETRY_DELAY", "5"))
+SUPPORTED_SUFFIXES = [".js", ".ts", ".prisma"]
 
 
 class Artefato(BaseModel):
@@ -52,6 +51,20 @@ class Artefato(BaseModel):
 
 class ResultadoAnalise(BaseModel):
     artefatos: List[Artefato]
+
+
+def resolve_repo_and_team(file_path: Path) -> tuple[str, str]:
+    rel_path = file_path.relative_to(BASE_DIR)
+    parts = rel_path.parts
+
+    if len(parts) < 2:
+        raise ValueError(
+            "Cada arquivo precisa estar em sample_projects/<repo>/<team>/..."
+        )
+
+    repo_name = parts[0]
+    team_name = parts[1]
+    return repo_name, team_name
 
 
 def build_schema() -> dict:
@@ -185,13 +198,14 @@ def process_file(file_path: Path) -> List[dict]:
     with open(file_path, "r", encoding="utf-8") as f:
         codigo = f.read()
 
+    repo_name, team_name = resolve_repo_and_team(file_path)
     rel_path = str(file_path.relative_to(BASE_DIR))
     dados = analyze_code_with_openrouter(codigo)
 
     artefatos = []
     for artefato in dados.get("artefatos", []):
         texto_embedding = f"""
-        Repositório: {REPO_NAME} | Time: {TEAM_NAME} | Arquivo: {rel_path}
+        Repositório: {repo_name} | Time: {team_name} | Arquivo: {rel_path}
         Bloco: {artefato['nome']} ({artefato['tipo']})
         Dependências: Tabelas {artefato['tabelas']} | Colunas {artefato['colunas']}
         Resumo de impacto: {artefato['resumo']}
@@ -199,8 +213,8 @@ def process_file(file_path: Path) -> List[dict]:
 
         artefatos.append(
             {
-                "repo": REPO_NAME,
-                "team": TEAM_NAME,
+                "repo": repo_name,
+                "team": team_name,
                 "path": rel_path,
                 "block_name": artefato["nome"],
                 "block_type": artefato["tipo"],
@@ -222,7 +236,7 @@ def main():
     todos_artefatos = []
 
     for file_path in BASE_DIR.rglob("*"):
-        if file_path.is_file() and file_path.suffix in [".js", ".ts", ".prisma"]:
+        if file_path.is_file() and file_path.suffix in SUPPORTED_SUFFIXES:
             todos_artefatos.extend(process_file(file_path))
 
     if not todos_artefatos:

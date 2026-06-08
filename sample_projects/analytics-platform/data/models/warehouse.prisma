@@ -1,0 +1,21 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("WAREHOUSE_DATABASE_URL")
+}
+
+model UserSnapshot {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  email          String
+  signupDate     DateTime
+  sourceSystem   String
+  snapshotDate   DateTime
+}
+
+model DailyUserMetric {
+  id              Int      @id @default(autoincrement())
+  metricDate      DateTime
+  newUsersCount   Int
+  activeUsers     Int
+  sourceReference String
+}
