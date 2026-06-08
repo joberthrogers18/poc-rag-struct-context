@@ -1,0 +1,7 @@
+psycopg2-binary
+pgvector
+scikit-learn
+joblib
+python-dotenv
+fastapi
+uvicorn
