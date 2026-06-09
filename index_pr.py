@@ -9,6 +9,7 @@ SUPPORTED_SUFFIXES = {".js", ".ts", ".prisma"}
 
 
 def parse_args():
+    # CLI usada em CI para descobrir o delta do PR e delegar a indexacao ao pacote.
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--base-ref",
@@ -29,6 +30,7 @@ def parse_args():
 
 
 def collect_changed_files(base_ref: str, head_ref: str) -> tuple[list[str], list[str]]:
+    # Traduz o diff do git em listas de arquivos modificados e deletados relevantes para o indice.
     cmd = [
         "git",
         "diff",
@@ -66,7 +68,7 @@ def main():
         print("Nenhum arquivo relevante do PR para indexar.")
         return
 
-    cmd = [sys.executable, "ingest.py"]
+    cmd = [sys.executable, "-m", "impact_indexing.ingest"]
     if changed_files:
         cmd.append("--files")
         cmd.extend(changed_files)

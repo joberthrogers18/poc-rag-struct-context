@@ -32,12 +32,14 @@ class ResultadoAnalise(BaseModel):
 
 
 def build_schema() -> dict:
+    # Gera o schema JSON esperado pelo modelo com compatibilidade para Pydantic 1 e 2.
     if hasattr(ResultadoAnalise, "model_json_schema"):
         return ResultadoAnalise.model_json_schema()
     return ResultadoAnalise.schema()
 
 
 def extract_message_content(message_content) -> str:
+    # Normaliza o formato da resposta do provider para uma string JSON consumivel.
     if isinstance(message_content, str):
         return message_content
 
@@ -52,6 +54,7 @@ def extract_message_content(message_content) -> str:
 
 
 def parse_analysis_response(body: dict) -> dict:
+    # Valida e desserializa a resposta do modelo para o formato interno do indexador.
     try:
         message = body["choices"][0]["message"]["content"]
         content = extract_message_content(message)
@@ -60,4 +63,3 @@ def parse_analysis_response(body: dict) -> dict:
         raise RuntimeError(
             f"Resposta inválida do OpenRouter. Corpo recebido: {json.dumps(body)[:2000]}"
         ) from exc
-
