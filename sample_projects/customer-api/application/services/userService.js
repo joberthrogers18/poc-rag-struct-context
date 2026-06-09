@@ -1,20 +1,15 @@
-const userRepository = require("../repositories/userRepository");
+import { createUser, findUserByEmail, listUsersCreatedAfter } from "../repositories/userRepository";
 
-async function registerUser(email, name) {
-  const existing = await userRepository.findUserByEmail(email);
+export async function registerUser(email, name) {
+  const existing = await findUserByEmail(email);
 
   if (existing) {
     throw new Error("User already exists");
   }
 
-  return userRepository.createUser({ email, name });
+  return createUser({ email, name });
 }
 
-async function listRecentUsers(referenceDate) {
-  return userRepository.listUsersCreatedAfter(referenceDate);
+export async function listRecentUsers(referenceDate) {
+  return listUsersCreatedAfter(referenceDate);
 }
-
-module.exports = {
-  registerUser,
-  listRecentUsers,
-};

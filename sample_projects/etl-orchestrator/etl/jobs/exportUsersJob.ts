@@ -1,7 +1,7 @@
-const userRepository = require("../../../customer-api/application/repositories/userRepository");
+import { listUsersCreatedAfter } from "../../../customer-api/application/repositories/userRepository";
 
-async function exportRecentUsers(createdAfter, destinationClient) {
-  const users = await userRepository.listUsersCreatedAfter(createdAfter);
+export async function exportRecentUsers(createdAfter, destinationClient) {
+  const users = await listUsersCreatedAfter(createdAfter);
 
   const payload = users.map((user) => ({
     userId: user.id,
@@ -12,7 +12,3 @@ async function exportRecentUsers(createdAfter, destinationClient) {
   await destinationClient.send("users.recent", payload);
   return payload.length;
 }
-
-module.exports = {
-  exportRecentUsers,
-};

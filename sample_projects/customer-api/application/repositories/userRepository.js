@@ -1,6 +1,6 @@
-const prisma = require("../prisma/client");
+import prisma from "../prisma/client";
 
-async function findUserByEmail(email) {
+export async function findUserByEmail(email) {
   return prisma.user.findUnique({
     where: { email },
     select: {
@@ -9,11 +9,13 @@ async function findUserByEmail(email) {
       name: true,
       createdAt: true,
       status: true,
+      billingStatus: true,
+      marketingOptIn: true,
     },
   });
 }
 
-async function createUser(data) {
+export async function createUser(data) {
   return prisma.user.create({
     data: {
       email: data.email,
@@ -23,7 +25,7 @@ async function createUser(data) {
   });
 }
 
-async function listUsersCreatedAfter(date) {
+export async function listUsersCreatedAfter(date) {
   return prisma.user.findMany({
     where: {
       createdAt: {
@@ -36,8 +38,39 @@ async function listUsersCreatedAfter(date) {
   });
 }
 
-module.exports = {
-  findUserByEmail,
-  createUser,
-  listUsersCreatedAfter,
-};
+export async function listUsersEligibleForBilling(referenceDate) {
+  return prisma.user.findMany({
+    where: {
+      createdAt: {
+        lte: referenceDate,
+      },
+      billingStatus: {
+        in: ["trial", "overdue"],
+      },
+    },
+    select: {
+      id: true,
+      email: true,
+      createdAt: true,
+      billingStatus: true,
+    },
+  });
+}
+
+export async function listMarketingOptInUsersCreatedAfter(date) {
+  return prisma.user.findMany({
+    where: {
+      createdAt: {
+        gte: date,
+      },
+      marketingOptIn: true,
+    },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      createdAt: true,
+      marketingOptIn: true,
+    },
+  });
+}

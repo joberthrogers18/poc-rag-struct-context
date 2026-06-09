@@ -12,7 +12,10 @@ model User {
   email     String   @unique
   name      String?
   status    String   @default("active")
+  billingStatus String @default("trial")
+  marketingOptIn Boolean @default(false)
   createdAt DateTime @default(now())
+  lastLoginAt DateTime?
   updatedAt DateTime @updatedAt
   orders    Order[]
 }
