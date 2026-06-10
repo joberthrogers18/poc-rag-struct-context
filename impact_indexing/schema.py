@@ -4,38 +4,38 @@ from typing import List, Literal
 from pydantic import BaseModel, Field
 
 
-class Artefato(BaseModel):
-    nome: str = Field(description="Nome da função, classe ou model")
-    tipo: Literal["função", "classe", "model"] = Field(
+class Artifacts(BaseModel):
+    name: str = Field(description="Nome da função, classe ou model")
+    type: Literal["função", "classe", "model"] = Field(
         description="Tipo do artefato analisado"
     )
-    linha_inicio: int = Field(
+    start_line: int = Field(
         description="Número da primeira linha do bloco baseado no código original"
     )
-    linha_fim: int = Field(
+    end_line: int = Field(
         description="Número da última linha do bloco baseado no código original"
     )
-    tabelas: List[str] = Field(
+    tables: List[str] = Field(
         description="Lista de tabelas de banco de dados referenciadas"
     )
-    colunas: List[str] = Field(
+    columns: List[str] = Field(
         description="Lista de colunas do banco de dados referenciadas"
     )
-    resumo: str = Field(
+    summary: str = Field(
         description="Uma frase explicando o que o bloco faz e seu impacto se quebrar"
     )
-    codigo: str = Field(description="O código fonte exato do bloco, sem omissões")
+    code: str = Field(description="O código fonte exato do bloco, sem omissões")
 
 
-class ResultadoAnalise(BaseModel):
-    artefatos: List[Artefato]
+class AnalysisResult(BaseModel):
+    artifacts: List[Artifacts]
 
 
 def build_schema() -> dict:
     # Gera o schema JSON esperado pelo modelo com compatibilidade para Pydantic 1 e 2.
-    if hasattr(ResultadoAnalise, "model_json_schema"):
-        return ResultadoAnalise.model_json_schema()
-    return ResultadoAnalise.schema()
+    if hasattr(AnalysisResult, "model_json_schema"):
+        return AnalysisResult.model_json_schema()
+    return AnalysisResult.schema()
 
 
 def extract_message_content(message_content) -> str:
@@ -61,5 +61,5 @@ def parse_analysis_response(body: dict) -> dict:
         return json.loads(content)
     except (KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
         raise RuntimeError(
-            f"Resposta inválida do OpenRouter. Corpo recebido: {json.dumps(body)[:2000]}"
+            f"Resposta inválida do Modelo. Corpo recebido: {json.dumps(body)[:2000]}"
         ) from exc

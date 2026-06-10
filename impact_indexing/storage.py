@@ -1,12 +1,12 @@
 import hashlib
+import psycopg2
 
 
 def ensure_tables(conn, source_type: str):
     # Garante que o banco tenha todas as tabelas e colunas esperadas pelo pipeline atual.
     with conn.cursor() as cur:
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-        cur.execute(
-            f"""
+        cur.execute(f"""
             CREATE TABLE IF NOT EXISTS artifact_files (
                 id SERIAL PRIMARY KEY,
                 repo TEXT NOT NULL,
@@ -18,28 +18,20 @@ def ensure_tables(conn, source_type: str):
                 last_indexed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 UNIQUE (repo, team, path)
             );
-            """
-        )
-        cur.execute(
-            """
+            """)
+        cur.execute("""
             ALTER TABLE artifact_chunks
             ADD COLUMN IF NOT EXISTS content_hash TEXT;
-            """
-        )
-        cur.execute(
-            """
+            """)
+        cur.execute("""
             ALTER TABLE artifact_chunks
             ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-            """
-        )
-        cur.execute(
-            """
+            """)
+        cur.execute("""
             CREATE INDEX IF NOT EXISTS artifact_chunks_lookup_idx
             ON artifact_chunks (repo, team, path);
-            """
-        )
-        cur.execute(
-            """
+            """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS artifact_relations (
                 id SERIAL PRIMARY KEY,
                 artifact_id INTEGER NOT NULL REFERENCES artifact_chunks(id) ON DELETE CASCADE,
@@ -50,20 +42,15 @@ def ensure_tables(conn, source_type: str):
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 UNIQUE (artifact_id, related_id, relation_type)
             );
-            """
-        )
-        cur.execute(
-            """
+            """)
+        cur.execute("""
             CREATE INDEX IF NOT EXISTS artifact_relations_artifact_idx
             ON artifact_relations (artifact_id);
-            """
-        )
-        cur.execute(
-            """
+            """)
+        cur.execute("""
             CREATE INDEX IF NOT EXISTS artifact_relations_related_idx
             ON artifact_relations (related_id);
-            """
-        )
+            """)
     conn.commit()
 
 
@@ -72,7 +59,35 @@ def compute_content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def get_indexed_file_hash(conn, repo_name: str, team_name: str, rel_path: str) -> str | None:
+def check_hash_exists(conn, content_hash: str) -> bool:
+    """
+    Verifica se o hash do arquivo já foi processado e existe no banco de dados.
+    """
+    # Se por algum motivo o hash vier vazio, força o processamento
+    if not content_hash:
+        return False
+
+    query = """
+        SELECT EXISTS(
+            SELECT 1 FROM artifact_chunks WHERE content_hash = %s
+        );
+    """
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, (content_hash,))
+            # fetchone()[0] vai retornar True se encontrar ou False se não encontrar
+            exists = cur.fetchone()[0]
+            return exists
+    except Exception as e:
+        print(f"[ERRO BANDO] Falha ao verificar hash no banco: {e}")
+        # Por segurança, se der erro no banco, retornamos False para processar o arquivo
+        return False
+
+
+def get_indexed_file_hash(
+    conn, repo_name: str, team_name: str, rel_path: str
+) -> str | None:
     # Consulta o ultimo hash conhecido para decidir se vale reprocessar o arquivo.
     with conn.cursor() as cur:
         cur.execute(
@@ -87,8 +102,10 @@ def get_indexed_file_hash(conn, repo_name: str, team_name: str, rel_path: str) -
     return row[0] if row else None
 
 
-def mark_file_deleted(conn, repo_name: str, team_name: str, rel_path: str, source_type: str):
-    # Remove chunks do arquivo e marca o path como deletado no catalogo de arquivos.
+def mark_file_deleted(
+    conn, repo_name: str, team_name: str, rel_path: str, source_type: str
+):
+    """Remove chunks do arquivo e marca o path como deletado no catalogo de arquivos."""
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -122,7 +139,7 @@ def replace_file_artifacts(
     artefatos: list[dict],
     source_type: str,
 ):
-    # Substitui todos os chunks de um arquivo pela versao mais recente reconstruida.
+    """Substitui todos os chunks de um arquivo pela versao mais recente reconstruida."""
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -173,7 +190,7 @@ def replace_file_artifacts(
 
 
 def fetch_file_artifacts(conn, file_keys: list[tuple[str, str, str]]) -> list[dict]:
-    # Carrega apenas os artefatos dos arquivos impactados nesta rodada.
+    """Carrega apenas os artefatos dos arquivos impactados nesta rodada."""
     artifacts = []
     with conn.cursor() as cur:
         for repo_name, team_name, rel_path in file_keys:
@@ -192,14 +209,12 @@ def fetch_file_artifacts(conn, file_keys: list[tuple[str, str, str]]) -> list[di
 
 
 def fetch_all_artifacts(conn) -> list[dict]:
-    # Relacoes heuristicas precisam enxergar o conjunto completo ja indexado.
+    """Relacoes heuristicas precisam enxergar o conjunto completo ja indexado."""
     with conn.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             SELECT id, repo, team, path, block_name, block_type, content, tables_ref, columns_ref, summary
             FROM artifact_chunks
-            """
-        )
+            """)
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description]
     return [dict(zip(cols, row)) for row in rows]

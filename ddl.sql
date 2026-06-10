@@ -26,7 +26,7 @@ CREATE TABLE artifact_chunks (
     columns_ref TEXT[],
     dependencies JSONB DEFAULT '{}',
     summary TEXT,
-    embedding vector(384),
+    embedding vector(3072),
     content_hash TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

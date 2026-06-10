@@ -4,12 +4,19 @@ import joblib
 from sklearn.feature_extraction.text import HashingVectorizer
 
 from impact_indexing.config import IndexingSettings
-from impact_indexing.openrouter_client import analyze_code_with_openrouter
+from impact_indexing.openrouter_client import analyze_code_with_llm
 from impact_indexing.paths import resolve_repo_and_team
-from impact_indexing.storage import compute_content_hash
+from impact_indexing.storage import compute_content_hash, check_hash_exists
+from genai_sdk.frameworks.langchain.boti_embeddings_langchain import (
+    BotiEmbeddingsLangChain,
+)
+from genai_sdk.model_enums import EmbeddingTask
+import time
 
 
-def process_file(settings: IndexingSettings, file_path: Path) -> tuple[list[dict], str, str, str, str]:
+def process_file(
+    conn, settings: IndexingSettings, file_path: Path
+) -> tuple[list[dict], str, str, str, str]:
     # Processa um unico arquivo e devolve artefatos prontos para persistencia.
     with open(file_path, "r", encoding="utf-8") as f:
         codigo = f.read()
@@ -17,60 +24,83 @@ def process_file(settings: IndexingSettings, file_path: Path) -> tuple[list[dict
     repo_name, team_name = resolve_repo_and_team(settings.base_dir, file_path)
     rel_path = str(file_path.relative_to(settings.base_dir))
     content_hash = compute_content_hash(codigo)
-    dados = analyze_code_with_openrouter(settings, codigo)
 
-    artefatos = []
-    for artefato in dados.get("artefatos", []):
+    if check_hash_exists(conn, content_hash):
+        print(f"[INDEX] Pulando {rel_path} (hash inalterado)")
+        return [], repo_name, team_name, rel_path, content_hash
+
+    dados = analyze_code_with_llm(settings, codigo)
+
+    print(
+        "[Aviso] Aguardando 2 segundos para limpar a janela de requisições do modelo..."
+    )
+    time.sleep(2)
+
+    artifacts = []
+    for artifact in dados.get("artefatos", []):
         texto_embedding = f"""
         Repositório: {repo_name} | Time: {team_name} | Arquivo: {rel_path}
-        Bloco: {artefato['nome']} ({artefato['tipo']})
-        Dependências: Tabelas {artefato['tabelas']} | Colunas {artefato['colunas']}
-        Resumo de impacto: {artefato['resumo']}
+        Bloco: {artifact['nome']} ({artifact['tipo']})
+        Dependências: Tabelas {artifact['tabelas']} | Colunas {artifact['colunas']}
+        Resumo de impacto: {artifact['resumo']}
         """.strip()
 
-        artefatos.append(
+        artifacts.append(
             {
                 "repo": repo_name,
                 "team": team_name,
                 "path": rel_path,
-                "block_name": artefato["nome"],
-                "block_type": artefato["tipo"],
-                "linha_inicio": artefato["linha_inicio"],
-                "linha_fim": artefato["linha_fim"],
-                "codigo": artefato["codigo"],
-                "tabelas": artefato["tabelas"],
-                "colunas": artefato["colunas"],
-                "resumo": artefato["resumo"],
+                "block_name": artifact["nome"],
+                "block_type": artifact["tipo"],
+                "linha_inicio": artifact["linha_inicio"],
+                "linha_fim": artifact["linha_fim"],
+                "codigo": artifact["codigo"],
+                "tabelas": artifact["tabelas"],
+                "colunas": artifact["colunas"],
+                "resumo": artifact["resumo"],
                 "texto_enriquecido": texto_embedding,
             }
         )
 
-    print(f"[INDEX] Processado: {rel_path} ({len(artefatos)} blocos)")
-    return artefatos, repo_name, team_name, rel_path, content_hash
+    print(f"[INDEX] Processado: {rel_path} ({len(artifacts)} blocos)")
+    return artifacts, repo_name, team_name, rel_path, content_hash
 
 
-def build_embeddings(settings: IndexingSettings, processed_files: list[dict]):
-    # Recalcula embeddings apenas para os artefatos desta rodada de indexacao.
-    all_artefatos = []
+def build_embeddings(processed_files: list[dict]):
+    """
+    Gera embeddings semânticos para os artefatos usando o GenAI SDK (BotiEmbeddingsLangChain).
+    """
+
+    all_artifacts = []
     for entry in processed_files:
-        all_artefatos.extend(entry["artefatos"])
+        all_artifacts.extend(entry["artefatos"])
 
-    textos = [art["texto_enriquecido"] for art in all_artefatos]
-    vectorizer = HashingVectorizer(
-        n_features=settings.hash_dim,
-        norm=None,
-        alternate_sign=False,
+    # Extrai os textos
+    texts = [art["texto_enriquecido"] for art in all_artifacts]
+
+    # Inicializa o modelo de embeddings do SDK do Boti
+    embeddings_model = BotiEmbeddingsLangChain(
+        model="text-embedding-004",
+        encoding_format="float",
+        task=EmbeddingTask.RETRIEVAL_DOCUMENT.value
     )
-    embeddings_matrix = vectorizer.transform(textos).toarray()
 
-    joblib.dump(vectorizer, "hashing_vectorizer.joblib")
-    print(f"[INDEX] Vetorizador Hashing salvo com {settings.hash_dim} dimensões.")
+    print(f"[INDEX] Gerando embeddings para {len(texts)} artefatos via GenAI SDK...")
 
+    # embed_documents processa a lista de textos e devolve list[list[float]]
+    embeddings_matrix = embeddings_model.embed_documents(texts)
+
+    # Verifica o tamanho da dimensão do embedding retornado apenas para log
+    dim_size = len(embeddings_matrix[0]) if embeddings_matrix else 0
+    print(f"[INDEX] Embeddings semânticos gerados com sucesso. (Dimensões: {dim_size})")
+
+    # Mapeia de volta para os artefatos
     offset = 0
     for entry in processed_files:
-        artefatos = entry["artefatos"]
-        for index, artefato in enumerate(artefatos):
-            artefato["embedding"] = embeddings_matrix[offset + index].tolist()
-        offset += len(artefatos)
+        artifacts = entry["artefatos"]
+        for index, artifact in enumerate(artifacts):
+            # Os embeddings já vêm no formato de lista de floats
+            artifact["embedding"] = embeddings_matrix[offset + index]
+        offset += len(artifacts)
 
-    return all_artefatos
+    return all_artifacts
