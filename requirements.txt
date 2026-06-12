@@ -5,3 +5,8 @@ joblib
 python-dotenv
 fastapi
 uvicorn
+genai-sdk==2.0.4
+langchain-core==0.3.76
+packaging==26.2
+langsmith==0.8.11
+tenacity==9.1.4

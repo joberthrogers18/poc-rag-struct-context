@@ -1,6 +1,10 @@
 import json
 import re
 
+from genai_sdk.model_enums import EmbeddingModels, EmbeddingTask, Models
+from genai_sdk.frameworks.langchain.boti_embeddings_langchain import (
+    BotiEmbeddingsLangChain,
+)
 
 def vector_to_pg(value: list[float]) -> str:
     # Converte a lista Python para o formato textual aceito pelo operador vector do Postgres.
@@ -72,10 +76,10 @@ def fetch_hybrid_results(conn, pergunta: str, embedding: list[float]) -> list[di
         cur.execute(
             """
             SELECT id, repo, team, path, block_name, block_type,
-                   block_start_line, block_end_line, summary,
-                   tables_ref, columns_ref, content
+                  block_start_line, block_end_line, summary,
+                  tables_ref, columns_ref, content
             FROM artifact_chunks
-            ORDER BY embedding <-> %s::vector
+            ORDER BY embedding <=> %s::vector
             LIMIT 12;
             """,
             (vector_to_pg(embedding),),
@@ -96,8 +100,8 @@ def fetch_hybrid_results(conn, pergunta: str, embedding: list[float]) -> list[di
 
         sql = f"""
             SELECT id, repo, team, path, block_name, block_type,
-                   block_start_line, block_end_line, summary,
-                   tables_ref, columns_ref, content
+                  block_start_line, block_end_line, summary,
+                  tables_ref, columns_ref, content
             FROM artifact_chunks
             WHERE {' OR '.join(clauses)}
             LIMIT 12;
@@ -111,7 +115,20 @@ def fetch_hybrid_results(conn, pergunta: str, embedding: list[float]) -> list[di
     return dedupe_artifacts(artifacts)
 
 
-def search_artifacts(conn, vectorizer, pergunta: str) -> list[dict]:
-    # Executa a busca completa a partir da pergunta do usuario.
-    embedding = vectorizer.transform([pergunta]).toarray()[0].tolist()
-    return fetch_hybrid_results(conn, pergunta, embedding)
+def search_artifacts(conn, question: str) -> list[dict]:
+    """
+    Executa a busca completa a partir da pergunta do usuario, 
+    usando embeddings semânticos.
+    """
+    embeddings_model = BotiEmbeddingsLangChain(
+        model="text-embedding-004",
+        encoding_format="float",
+        task=EmbeddingTask.RETRIEVAL_QUERY.value, 
+    )
+
+    print(f"[BUSCA] Gerando embedding semântico para a pergunta: '{question}'")
+    
+    # embed_query transforma a pergunta numa lista de floats (o embedding de 3072 dims)
+    embedding = embeddings_model.embed_query(question)
+    
+    return fetch_hybrid_results(conn, question, embedding)

@@ -7,6 +7,10 @@ from typing import Any
 from impact_query.config import QuerySettings
 from impact_query.context_builder import build_local_report
 
+import json
+import time
+from genai_sdk.frameworks.langchain.boti_chat_langchain import BotiChatLangChain
+from genai_sdk.model_enums import Models
 
 # --- Funções Auxiliares de Suporte ---
 
@@ -136,3 +140,79 @@ def call_openrouter_for_report(
             return _fallback_with_msg(f"Falha de rede ao chamar OpenRouter: {exc.reason}")
 
     return _fallback_with_msg("OpenRouter falhou apos esgotar todas as tentativas.")
+  
+  
+def call_llm_for_report(
+    settings: QuerySettings, question: str, context: dict, report: dict
+) -> str:
+    """Chama o LLM via Boti SDK utilizando retry exponencial e fallback local em caso de falha."""
+    
+    # Função interna rápida para padronizar as mensagens de erro com o fallback
+    def _fallback_with_msg(reason_msg: str) -> str:
+        # Assumindo que build_local_report já está importada no seu arquivo
+        local_rep = build_local_report(report, question)
+        return f"{reason_msg}\n\n{local_rep}"
+
+    # 1. Instancia o modelo Gemini com a mesma temperatura baixa
+    llm = BotiChatLangChain(
+        model=Models.GEMINI, 
+        model_name="gemini-2.0-flash",
+        temperature=0.2
+    )
+
+    # 2. Monta as mensagens
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Você é um analista sênior de impacto técnico. "
+                "Use apenas o contexto fornecido e responda em pt-BR. "
+                "Seja claro, explicativo e objetivo. "
+                "Destaque os times afetados, os arquivos mais importantes, os riscos e o passo a passo recomendado. "
+                "Quando a evidência for indireta, diga isso explicitamente."
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps({"question": question, "context": context, "report": report}, ensure_ascii=False),
+        },
+    ]
+
+    # Reaproveitando as configurações de retry do seu settings
+    max_retries = getattr(settings, "openrouter_max_retries", 3)
+    retry_delay_base = getattr(settings, "openrouter_retry_delay", 5.0)
+
+    # 3. Laço de tentativas (muito mais rápido e sem o timeout cego do urllib)
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"[LLM] Analisando contexto e escrevendo relatório (Tentativa {attempt}/{max_retries})...")
+            
+            # O LangChain abstrai as requisições HTTP pra gente
+            response = llm.invoke(messages)
+            
+            # Verifica se retornou texto válido
+            if hasattr(response, 'content') and response.content:
+                return response.content
+                
+            return _fallback_with_msg("LLM respondeu em branco. Retornando fallback local.")
+
+        except Exception as exc:
+            error_str = str(exc).lower()
+            
+            # Se for Rate Limit (429 / Quota), tenta esperar
+            if any(term in error_str for term in ["429", "too many requests", "quota", "resourceexhausted"]):
+                retry_delay = retry_delay_base * attempt
+                print(f"[LLM] Rate Limit atingido na tentativa {attempt}. Aguardando {retry_delay:.1f}s...")
+                time.sleep(retry_delay)
+                continue
+
+            # Falha de rede ou outro erro de API
+            if attempt < max_retries:
+                retry_delay = retry_delay_base * attempt
+                print(f"[LLM] Erro na API na tentativa {attempt}. Aguardando {retry_delay:.1f}s... Erro: {exc}")
+                time.sleep(retry_delay)
+                continue
+
+            return _fallback_with_msg(f"Falha ao chamar o LLM após {max_retries} tentativas. Erro: {exc}")
+
+    return _fallback_with_msg("LLM falhou após esgotar todas as tentativas.")

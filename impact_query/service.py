@@ -7,7 +7,7 @@ from pgvector.psycopg2 import register_vector
 
 from impact_query.config import QuerySettings
 from impact_query.context_builder import build_llm_context, build_report
-from impact_query.llm_client import call_openrouter_for_report
+from impact_query.llm_client import call_openrouter_for_report, call_llm_for_report
 from impact_query.relations import expand_related_artifacts
 from impact_query.search import dedupe_artifacts, search_artifacts
 from impact_query.vectorizer import load_vectorizer
@@ -28,23 +28,24 @@ def _get_db_connection(db_conn_str: str):
         conn.close()
 
 
-def search_impact_code(pergunta: str, settings: QuerySettings | None = None) -> list[dict]:
+def search_impact_code(
+    question: str, settings: QuerySettings | None = None
+) -> list[dict]:
     """Retorna somente os artefatos candidatos para debug ou exploracao manual."""
     settings = settings or QuerySettings()
-    vectorizer = load_vectorizer(settings)
-    
+
     with _get_db_connection(settings.db_conn) as conn:
-        return search_artifacts(conn, vectorizer, pergunta)
+        return search_artifacts(conn, question)
 
 
 def generate_impact_report(
-    pergunta: str | None = None,
+    question: str | None = None,
     ids: list[int] | None = None,
     settings: QuerySettings | None = None,
 ) -> dict:
     """Orquestra a consulta inteira: busca, expansao por relacoes, contexto e resposta final."""
-    if ids is None and pergunta is None:
-        return {"error": "Informe 'ids' ou 'pergunta'"}
+    if ids is None and question is None:
+        return {"error": "Informe 'ids' ou 'question'"}
 
     settings = settings or QuerySettings()
     artifacts = []
@@ -56,8 +57,8 @@ def generate_impact_report(
                 cur.execute(
                     """
                     SELECT id, repo, team, path, block_name, block_type,
-                           block_start_line, block_end_line, summary,
-                           tables_ref, columns_ref, content
+                          block_start_line, block_end_line, summary,
+                          tables_ref, columns_ref, content
                     FROM artifact_chunks
                     WHERE id = ANY(%s)
                     """,
@@ -66,8 +67,7 @@ def generate_impact_report(
                 # Como RealDictCursor retorna instâncias de RealDict, convertemos para dict puro se necessário
                 artifacts.extend(dict(row) for row in cur.fetchall())
         else:
-            vectorizer = load_vectorizer(settings)
-            artifacts.extend(search_artifacts(conn, vectorizer, pergunta))
+            artifacts.extend(search_artifacts(conn, question))
 
         artifacts = dedupe_artifacts(artifacts)
         # Expande a busca com relacoes persistidas para capturar consumidores indiretos
@@ -75,8 +75,8 @@ def generate_impact_report(
 
     # O banco já fechou com segurança aqui. Agora processamos a inteligência/LLM.
     report = build_report(artifacts)
-    llm_context = build_llm_context(report, pergunta, artifacts)
-    answer = call_openrouter_for_report(settings, pergunta, llm_context, report)
+    llm_context = build_llm_context(report, question, artifacts)
+    answer = call_llm_for_report(settings, question, llm_context, report)
 
     return {
         "answer": answer,
@@ -86,16 +86,22 @@ def generate_impact_report(
     }
 
 
-def search_impact_code_json(pergunta: str, settings: QuerySettings | None = None) -> str:
+def search_impact_code_json(
+    question: str, settings: QuerySettings | None = None
+) -> str:
     """Mantem compatibilidade com a camada CLI que espera uma string JSON."""
-    return json.dumps(search_impact_code(pergunta, settings), ensure_ascii=False)
+    return json.dumps(search_impact_code(question, settings), ensure_ascii=False)
 
 
 def generate_impact_report_text(
-    pergunta: str | None = None,
+    question: str | None = None,
     ids: list[int] | None = None,
     settings: QuerySettings | None = None,
 ) -> str:
     """Devolve apenas o texto final para clients simples como CLI ou bot."""
-    result = generate_impact_report(pergunta=pergunta, ids=ids, settings=settings)
-    return json.dumps(result, ensure_ascii=False) if "error" in result else result["answer"]
+    result = generate_impact_report(question=question, ids=ids, settings=settings)
+    return (
+        json.dumps(result, ensure_ascii=False)
+        if "error" in result
+        else result["answer"]
+    )
